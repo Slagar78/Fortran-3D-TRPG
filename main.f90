@@ -29,8 +29,8 @@ program main
     real :: model_angle
 
     ! ---------- Физика прыжка ----------
-    real, parameter :: GRAVITY = 10.0          ! ускорение свободного падения
-    real, parameter :: JUMP_VELOCITY = 5.5     ! начальная скорость вверх
+    real, parameter :: GRAVITY = 10.0
+    real, parameter :: JUMP_VELOCITY = 5.5
     real :: vertical_vel = 0.0
     logical :: is_grounded = .true.
 
@@ -38,7 +38,7 @@ program main
     type(c_ptr) :: anims_ptr = c_null_ptr
     integer(kind=c_int) :: anim_count = 0
     logical :: have_anim = .false.
-    integer :: anim_index = 3             ! начинаем с Idle
+    integer :: anim_index = 3
     type(model_animation_type), pointer, dimension(:) :: anims => null()
 
     real :: anim_timer = 0.0
@@ -46,6 +46,7 @@ program main
 
     integer :: player_ix, player_iz, player_layer
     logical :: moving = .false.
+    ! для движения по земле
     integer :: target_ix, target_iz, target_layer
     real :: target_x, target_z, target_y
     real :: dx, dy, dz, dist, step
@@ -74,12 +75,10 @@ program main
     hero_min_y  = hero_box%min%y
     hero_scale = 1.5 / hero_height
 
-    ! Загрузка анимаций
     anims_ptr = load_model_animations('assets/allies/models/hero.glb' // c_null_char, anim_count)
     if (anim_count > 0) then
         call c_f_pointer(anims_ptr, anims, [anim_count])
         have_anim = .true.
-        print*, '=== ANIMATIONS LOADED ===', anim_count
     end if
 
     palette(0) = GRAY
@@ -91,13 +90,11 @@ program main
     palette(6) = PURPLE
     palette(7) = PINK
 
-    ! ====================== ЗАГРУЗКА МУЗЫКИ ======================
     bgm = load_music_stream('assets/sounds/Brave_Eagle.mp3' // c_null_char)
     music_ready = .true.
     call set_music_volume(bgm, 0.5)
     call play_music_stream(bgm)
 
-    ! ====================== ЗАГРУЗКА КАРТЫ ======================
     map_path = 'data/maps/576.map'
     open(unit=10, file=map_path, status='old', action='read', iostat=ios)
     if (ios /= 0) then
@@ -137,7 +134,6 @@ program main
         close(10)
     end if
 
-    ! ====================== СТАРТОВАЯ ПОЗИЦИЯ ======================
     player_ix = GRID_SIZE/2
     player_iz = GRID_SIZE/2
     do i = 0, GRID_SIZE-1
@@ -154,21 +150,16 @@ program main
     player_pos = vector3_type(real(player_ix) + 0.5, &
                               real(player_layer) * CELL_HEIGHT - hero_min_y * hero_scale, &
                               real(player_iz) + 0.5)
-    target_ix = player_ix
-    target_iz = player_iz
-    target_layer = player_layer
     call init_follow_camera(follow_cam, player_pos, camera_distance, camera_height)
 
     ! ====================== ГЛАВНЫЙ ЦИКЛ ======================
     do while (.not. window_should_close())
         dt = get_frame_time()
 
-        ! ---------- ОБНОВЛЕНИЕ МУЗЫКИ ----------
         if (music_ready) call update_music_stream(bgm)
 
-        ! ---------- АНИМАЦИЯ (однократный прыжок без зацикливания) ----------
+        ! ---------- АНИМАЦИЯ ----------
         if (have_anim .and. anim_count > 0) then
-            ! Определяем нужную анимацию
             if (.not. is_grounded) then
                 anim_index = 4   ! Robot_Jump
             else if (moving) then
@@ -179,12 +170,11 @@ program main
 
             if (anim_index < 1 .or. anim_index > anim_count) anim_index = 3
 
-            ! Для прыжка ограничиваем длительность одним циклом
             if (anim_index == 4) then
                 if (anim_timer < real(anims(4)%frame_count)) then
                     current_frame = int(anim_timer)
                 else
-                    current_frame = anims(4)%frame_count - 1   ! застыл на последнем кадре
+                    current_frame = anims(4)%frame_count - 1
                 end if
             else
                 current_frame = mod(int(anim_timer), anims(anim_index)%frame_count)
@@ -206,8 +196,9 @@ program main
 
         ! ---------- ДВИЖЕНИЕ И ПРЫЖКИ ----------
         if (is_grounded) then
+            ! ---------- НА ЗЕМЛЕ ----------
             if (.not. moving) then
-                ! Обычный шаг
+                ! обычный шаг (только по горизонтали/вниз)
                 if (is_key_down(KEY_UP)) then
                     target_ix = player_ix + nint(forward%x)
                     target_iz = player_iz + nint(forward%z)
@@ -234,38 +225,19 @@ program main
                     end if
                 end if
 
-                ! --- Прыжок (пробел) ---
+                ! --- Начало прыжка (пробел) ---
                 if (is_key_pressed(KEY_SPACE)) then
-                    if (is_key_down(KEY_UP)) then
-                        target_ix = player_ix + nint(forward%x)
-                        target_iz = player_iz + nint(forward%z)
-                        player_dir_angle = move_angle_h
-                    else if (is_key_down(KEY_DOWN)) then
-                        target_ix = player_ix - nint(forward%x)
-                        target_iz = player_iz - nint(forward%z)
-                        player_dir_angle = move_angle_h + 3.14159265
-                    else
-                        target_ix = player_ix
-                        target_iz = player_iz
-                    end if
-
-                    if (target_ix >= 0 .and. target_ix < GRID_SIZE .and. &
-                        target_iz >= 0 .and. target_iz < GRID_SIZE) then
-                        target_layer = layers_count(target_ix, target_iz)
-                        if (target_layer <= player_layer + 1) then
-                            moving = .true.
-                            is_grounded = .false.
-                            vertical_vel = JUMP_VELOCITY
-                            anim_timer = 0.0               ! сброс таймера для начала прыжка
-                            target_x = real(target_ix) + 0.5
-                            target_z = real(target_iz) + 0.5
-                            target_y = real(target_layer) * CELL_HEIGHT - hero_min_y * hero_scale
-                        end if
-                    end if
+                    is_grounded = .false.
+                    vertical_vel = JUMP_VELOCITY
+                    anim_timer = 0.0
+                    moving = .true.   ! чтобы анимация переключилась
+                    ! Запоминаем слой, с которого прыгнули (на него будем ориентироваться при проверке стен)
+                    ! Дополнительная переменная для текущего слоя в воздухе (уже есть player_layer)
+                    ! Пока в воздухе player_layer остаётся неизменным, обновится при приземлении
                 end if
             end if
 
-            ! Движение по земле
+            ! Движение по земле (плавное перемещение к target)
             if (moving .and. is_grounded) then
                 dx = target_x - player_pos%x
                 dz = target_z - player_pos%z
@@ -288,32 +260,53 @@ program main
                 end if
             end if
         else
-            ! ---------- В ВОЗДУХЕ ----------
-            dx = target_x - player_pos%x
-            dz = target_z - player_pos%z
-            dist = sqrt(dx*dx + dz*dz)
-            step = player_speed * dt
-
-            if (dist > step) then
-                player_pos%x = player_pos%x + dx / dist * step
-                player_pos%z = player_pos%z + dz / dist * step
-            else
-                player_pos%x = target_x
-                player_pos%z = target_z
+            ! ---------- В ВОЗДУХЕ (прыжок) ----------
+            ! Горизонтальное движение по желанию игрока
+            if (is_key_down(KEY_UP)) then
+                player_pos%x = player_pos%x + forward%x * player_speed * dt
+                player_pos%z = player_pos%z + forward%z * player_speed * dt
+            else if (is_key_down(KEY_DOWN)) then
+                player_pos%x = player_pos%x - forward%x * player_speed * dt
+                player_pos%z = player_pos%z - forward%z * player_speed * dt
             end if
 
+            ! Ограничение: не входить в клетки, которые выше текущего слоя (стены)
+            ! Определяем клетку, в которой находимся
+            player_ix = floor(player_pos%x)
+            player_iz = floor(player_pos%z)
+
+            ! Корректируем позицию, если зашли в стену (высота клетки > player_layer)
+            if (player_ix < 0) player_ix = 0
+            if (player_iz < 0) player_iz = 0
+            if (player_ix >= GRID_SIZE) player_ix = GRID_SIZE-1
+            if (player_iz >= GRID_SIZE) player_iz = GRID_SIZE-1
+
+            if (layers_count(player_ix, player_iz) > player_layer) then
+                ! пытаемся вернуться на предыдущую позицию (грубо)
+                player_pos%x = player_pos%x - forward%x * player_speed * dt
+                player_pos%z = player_pos%z - forward%z * player_speed * dt
+                ! пересчитываем клетку
+                player_ix = floor(player_pos%x)
+                player_iz = floor(player_pos%z)
+                ! если всё ещё в стене, выталкиваем в центр ближайшей допустимой?
+            end if
+
+            ! Вертикальная физика
             vertical_vel = vertical_vel - GRAVITY * dt
             player_pos%y = player_pos%y + vertical_vel * dt
 
+            ! Проверка приземления
+            target_y = real(layers_count(player_ix, player_iz)) * CELL_HEIGHT - hero_min_y * hero_scale
             if (player_pos%y <= target_y) then
                 player_pos%y = target_y
-                player_ix = target_ix
-                player_iz = target_iz
-                player_layer = target_layer
+                player_layer = layers_count(player_ix, player_iz)
                 is_grounded = .true.
                 moving = .false.
                 vertical_vel = 0.0
-                anim_timer = 0.0                    ! сброс при приземлении
+                anim_timer = 0.0
+                ! обновим позицию, чтобы стоять ровно в центре клетки? Оставим как есть, можно чуть подкорректировать
+                player_pos%x = real(player_ix) + 0.5
+                player_pos%z = real(player_iz) + 0.5
             end if
         end if
 
