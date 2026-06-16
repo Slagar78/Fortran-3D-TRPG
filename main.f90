@@ -177,12 +177,12 @@ program main
         ! ---------- АНИМАЦИЯ ----------
         if (have_anim .and. anim_count > 0) then
             if (moving) then
-                if (anim_index /= 11) then      ! Robot_Walking
+                if (anim_index /= 11) then      ! Robot_Walking (обычная ходьба)
                     anim_index = 11
                     anim_timer = 0.0
                 end if
             else
-                if (anim_index /= 3) then       ! Robot_Idle
+                if (anim_index /= 3) then       ! Robot_Idle (стоя, голова кивает)
                     anim_index = 3
                     anim_timer = 0.0
                 end if
@@ -192,7 +192,9 @@ program main
 
             call update_model_animation(hero_model, anims(anim_index), current_frame)
 
-            anim_timer = anim_timer + dt * 142.5
+            ! Скорость подогнана так, чтобы один цикл ходьбы (57 кадров) занимал
+            ! ровно столько же времени, сколько персонаж идёт одну клетку (при player_speed = 2.5)
+            anim_timer = anim_timer + dt * 110.5
             current_frame = mod(int(anim_timer), anims(anim_index)%frame_count)
         end if
 
