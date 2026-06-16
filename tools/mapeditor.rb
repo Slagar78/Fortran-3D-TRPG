@@ -15,9 +15,6 @@ CELL_SIZE = 1.0
 CELL_HEIGHT = 1.0
 MAX_HEIGHT = 8
 
-# Цвета и соответствующие им типы (серый = пол, остальные = стена)
-# Для кодирования: тип*8 + цвет
-# тип: 1=пол (проходимый), 2=стена (непроходимая)
 COLOR_NAMES = {
   0 => "Пол (серый)",
   1 => "Стена (красный)",
@@ -33,21 +30,31 @@ COLORS_PALETTE = [
 ]
 
 def block_type_for_color(color_idx)
-  color_idx == 0 ? 1 : 2   # 1=FLOOR, 2=WALL
+  color_idx == 0 ? 1 : 2
 end
 
-def encode_layer(color_idx)
-  type = block_type_for_color(color_idx)
-  type * 8 + color_idx
+def encode_layer(color_idx, rotation = 0)
+  if color_idx == 0
+    8   # пол всегда 8
+  else
+    (rotation << 4) | color_idx   # стена: rotation в битах 4–5, цвет в 0–3
+  end
 end
 
 def decode_layer(value)
-  type = value / 8
-  color_idx = value % 8
-  [type, color_idx]
+  if value == 8
+    # серый пол
+    [1, 0, 0]   # type=1 (FLOOR), color_idx=0, rotation=0
+  else
+    color_idx = value & 0xF
+    rotation  = (value >> 4) & 0x3
+    type      = color_idx == 0 ? 1 : 2
+    [type, color_idx, rotation]
+  end
 end
 
-@current_color_index = 1   # по умолчанию красная стена
+
+@current_color_index = 1
 @map_data = Array.new(GRID_SIZE) { Array.new(GRID_SIZE) { [] } }
 @erase_mode = false
 
@@ -95,13 +102,13 @@ def add_button(x, y, w, h, label, action)
 end
 
 button_x = 400
-btn_save = add_button(button_x, BUTTON_Y, 100, BUTTON_HEIGHT, "Save", :save)
+btn_save   = add_button(button_x, BUTTON_Y, 100, BUTTON_HEIGHT, "Save", :save)
 button_x += 100 + BUTTON_GAP
-btn_load = add_button(button_x, BUTTON_Y, 100, BUTTON_HEIGHT, "Load", :load)
+btn_load   = add_button(button_x, BUTTON_Y, 100, BUTTON_HEIGHT, "Load", :load)
 button_x += 100 + BUTTON_GAP
-btn_erase = add_button(button_x, BUTTON_Y, 120, BUTTON_HEIGHT, "Erase (hold)", :erase)
+btn_erase  = add_button(button_x, BUTTON_Y, 120, BUTTON_HEIGHT, "Erase (hold)", :erase)
 button_x += 120 + BUTTON_GAP
-btn_clear = add_button(button_x, BUTTON_Y, 120, BUTTON_HEIGHT, "Clear cell", :clear_cell)
+btn_clear  = add_button(button_x, BUTTON_Y, 120, BUTTON_HEIGHT, "Clear cell", :clear_cell)
 
 buttons = [btn_save, btn_load, btn_erase, btn_clear]
 
@@ -112,7 +119,7 @@ remove_timer = 0.0
 
 state = :edit
 save_filename = ""
-save_overwrite = nil   # имя файла для перезаписи (если выбрали существующий)
+save_overwrite = nil
 load_files = []
 load_selected_index = 0
 load_scroll_offset = 0
@@ -172,11 +179,66 @@ def button_clicked?(btn, mouse_x, mouse_y)
   mouse_y >= btn[:y] && mouse_y <= btn[:y] + btn[:h]
 end
 
+# ---------- drawing helpers ----------
+# Рисует треугольную призму – ровно половина куба по диагонали.
+# Основание: прямоугольный треугольник с катетами CELL_SIZE, 
+# вершины касаются трёх углов клетки.
+def draw_triangle_prism(cx, cy, cz, size_xz, height, rotation, color)
+  half = size_xz / 2.0
+  h = height / 2.0
+
+  # Локальные координаты основания (без поворота):
+  # Треугольник в левой задней части клетки, вершины:
+  #   A (левый задний угол), B (правый задний), C (левый передний)
+  pts = [
+    Vector3.create(-half, 0, -half),  # A
+    Vector3.create( half, 0, -half),  # B
+    Vector3.create(-half, 0,  half)   # C
+  ]
+
+  # Поворот вокруг вертикали (Y)
+  angle = rotation * Math::PI / 2.0
+  cos_a = Math.cos(angle); sin_a = Math.sin(angle)
+  pts.map! do |v|
+    nx = v.x * cos_a - v.z * sin_a
+    nz = v.x * sin_a + v.z * cos_a
+    Vector3.create(nx, v.y, nz)
+  end
+
+  # Сдвиг в мировые координаты (центр клетки)
+  pts.map! { |v| Vector3.create(v.x + cx, v.y + cy, v.z + cz) }
+
+  top = pts.map { |v| Vector3.create(v.x, v.y + h, v.z) }
+  bot = pts.map { |v| Vector3.create(v.x, v.y - h, v.z) }
+
+  # Основания
+  DrawTriangle3D(top[0], top[1], top[2], color)
+  DrawTriangle3D(bot[0], bot[2], bot[1], color)
+
+  # Боковые грани
+  DrawTriangle3D(top[0], bot[0], top[1], color)
+  DrawTriangle3D(top[1], bot[0], bot[1], color)
+
+  DrawTriangle3D(top[1], bot[1], top[2], color)
+  DrawTriangle3D(top[2], bot[1], bot[2], color)
+
+  DrawTriangle3D(top[2], bot[2], top[0], color)
+  DrawTriangle3D(top[0], bot[2], bot[0], color)
+
+  # Рёбра
+  edges = [
+    [top[0], top[1]], [top[1], top[2]], [top[2], top[0]],
+    [bot[0], bot[1]], [bot[1], bot[2]], [bot[2], bot[0]],
+    [top[0], bot[0]], [top[1], bot[1]], [top[2], bot[2]]
+  ]
+  edges.each { |a, b| DrawLine3D(a, b, BLACK) }
+end
+
 # ---------- main loop ----------
 until WindowShouldClose()
   dt = GetFrameTime()
 
-  # camera
+  # camera controls
   if IsMouseButtonDown(MOUSE_BUTTON_RIGHT)
     delta = GetMouseDelta()
     angle_h -= delta.x * 0.005
@@ -262,6 +324,21 @@ until WindowShouldClose()
       stack.pop if stack.any?
     end
 
+    # Rotate red block with TAB key
+    if highlighted_cell && IsKeyPressed(KEY_TAB)
+      ix, iz = highlighted_cell
+      stack = @map_data[iz][ix]
+      unless stack.empty?
+        encoded = stack.last
+        _, color_idx, rotation = decode_layer(encoded)
+        # вращаем только красные блоки (color_idx == 1)
+        if color_idx == 1
+          new_rot = (rotation + 1) % 4
+          stack[-1] = encode_layer(color_idx, new_rot)
+        end
+      end
+    end
+
     # continuous draw / erase
     if IsMouseButtonDown(MOUSE_BUTTON_LEFT) && highlighted_cell
       over_ui = false
@@ -306,7 +383,6 @@ until WindowShouldClose()
     end
 
   when :save_dialog
-    # Обработка ввода текста
     key = GetCharPressed()
     while key > 0
       if key >= 32 && key <= 125 && @save_filename.length < 20
@@ -319,7 +395,6 @@ until WindowShouldClose()
       @save_filename.chop!
     end
 
-    # Выбор существующего файла стрелками
     if IsKeyPressed(KEY_UP)
       @load_selected_index -= 1 if @load_selected_index > 0
       @load_scroll_offset = @load_selected_index if @load_selected_index < @load_scroll_offset
@@ -330,7 +405,6 @@ until WindowShouldClose()
       end
     end
 
-    # Enter: если выделен файл – перезаписать, иначе сохранить новое имя
     if IsKeyPressed(KEY_ENTER)
       if @load_files.any? && @load_selected_index < @load_files.size
         save_map_to_file(@load_files[@load_selected_index])
@@ -382,12 +456,18 @@ until WindowShouldClose()
       center_x = ix * CELL_SIZE + CELL_SIZE/2.0
       center_z = iz * CELL_SIZE + CELL_SIZE/2.0
       stack.each_with_index do |encoded, layer|
-        type, color_idx = decode_layer(encoded)
+        type, color_idx, rotation = decode_layer(encoded)
         color = COLORS_PALETTE[color_idx] || GRAY
         y = layer * CELL_HEIGHT + CELL_HEIGHT/2.0
-        pos = Vector3.create(center_x, y, center_z)
-        DrawCube(pos, CELL_SIZE, CELL_HEIGHT, CELL_SIZE, color)
-        DrawCubeWires(pos, CELL_SIZE, CELL_HEIGHT, CELL_SIZE, BLACK)
+
+        # ТОЛЬКО красные блоки (color_idx == 1) — треугольная призма (половина куба)
+        if color_idx == 1
+          draw_triangle_prism(center_x, y, center_z, CELL_SIZE, CELL_HEIGHT, rotation, color)
+        else
+          pos = Vector3.create(center_x, y, center_z)
+          DrawCube(pos, CELL_SIZE, CELL_HEIGHT, CELL_SIZE, color)
+          DrawCubeWires(pos, CELL_SIZE, CELL_HEIGHT, CELL_SIZE, BLACK)
+        end
       end
     end
   end
@@ -415,6 +495,7 @@ until WindowShouldClose()
   case state
   when :edit
     DrawText("Mode: #{@erase_mode ? 'ERASE' : 'DRAW'} | Color: #{COLOR_NAMES[@current_color_index]}", 10, 10, 20, BLACK)
+    DrawText("TAB over red wall = rotate 90°", 10, 30, 15, DARKGRAY)
     # palette
     PALETTE_COUNT.times do |i|
       x = PALETTE_X + i * (PALETTE_CELL + PALETTE_GAP)
@@ -447,7 +528,6 @@ until WindowShouldClose()
   when :save_dialog
     DrawRectangle(0, 0, 1200, 800, Fade(BLACK, 0.5))
     DrawText("Save map to data/maps/", 300, 100, 30, WHITE)
-    # Список существующих карт
     if @load_files.any?
       DrawText("Existing maps (select to overwrite):", 300, 150, 20, LIGHTGRAY)
       visible = @load_files[@load_scroll_offset, MAX_VISIBLE_FILES] || []
