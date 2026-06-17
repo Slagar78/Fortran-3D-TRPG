@@ -227,8 +227,8 @@ program main
 
         ! ---------- ПОВОРОТ (блокируется при открытом меню) ----------
         if (.not. action_menu%visible) then
-            if (is_key_down(KEY_LEFT))  move_angle_h = move_angle_h - rot_speed * dt
-            if (is_key_down(KEY_RIGHT)) move_angle_h = move_angle_h + rot_speed * dt
+            if (is_key_down(KEY_A))  move_angle_h = move_angle_h - rot_speed * dt
+            if (is_key_down(KEY_D)) move_angle_h = move_angle_h + rot_speed * dt
         end if
 
         call update_follow_camera(follow_cam, player_pos, move_angle_h)
@@ -245,11 +245,11 @@ program main
             if (is_grounded) then
                 ! ---------- НА ЗЕМЛЕ ----------
                 if (.not. moving) then
-                    if (is_key_down(KEY_UP)) then
+                    if (is_key_down(KEY_W)) then
                         target_ix = player_ix + nint(forward%x)
                         target_iz = player_iz + nint(forward%z)
                         player_dir_angle = move_angle_h
-                    else if (is_key_down(KEY_DOWN)) then
+                    else if (is_key_down(KEY_S)) then
                         target_ix = player_ix - nint(forward%x)
                         target_iz = player_iz - nint(forward%z)
                         player_dir_angle = move_angle_h + 3.14159265
@@ -302,10 +302,10 @@ program main
                 end if
             else
                 ! ---------- В ВОЗДУХЕ ----------
-                if (is_key_down(KEY_UP)) then
+                if (is_key_down(KEY_W)) then
                     player_pos%x = player_pos%x + forward%x * player_speed * dt
                     player_pos%z = player_pos%z + forward%z * player_speed * dt
-                else if (is_key_down(KEY_DOWN)) then
+                else if (is_key_down(KEY_S)) then
                     player_pos%x = player_pos%x - forward%x * player_speed * dt
                     player_pos%z = player_pos%z - forward%z * player_speed * dt
                 end if
@@ -409,7 +409,7 @@ program main
             end select
             call draw_menu(action_menu)
 
-            call draw_text('LEFT/RIGHT - turn | UP/DOWN - move | SPACE - jump' // c_null_char, 10, 10, 20, DARKGRAY)
+            call draw_text('W/S - move | A/D - turn | SPACE - jump | TAB - menu' // c_null_char, 10, 10, 20, DARKGRAY)
             call draw_fps(700, 10)
         call end_drawing()
     end do

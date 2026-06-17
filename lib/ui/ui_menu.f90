@@ -73,14 +73,9 @@ contains
 
         btn = 0
 
-        if (is_key_pressed(KEY_A) .or. is_key_pressed(KEY_D)) then
+        if (is_key_pressed(KEY_TAB)) then
             menu%visible = .not. menu%visible
             if (menu%visible) menu%selected = 1
-            return
-        end if
-
-        if (is_key_pressed(KEY_S)) then
-            menu%visible = .false.
             return
         end if
 
