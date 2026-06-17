@@ -26,6 +26,10 @@ program main
     real :: dt, rot_speed = 2.5, player_speed = 3.0
     real :: camera_distance = 5.0, camera_height = 1.0
     real :: move_angle_h = 0.0
+    real :: mouse_sensitivity = 0.005
+    logical :: mouse_captured = .false.
+    integer :: prev_mouse_x, prev_mouse_y, mouse_x, mouse_y, delta_x, delta_y
+    real :: camera_pitch = 0.0          ! вертикальный угол (радианы)
     real :: player_dir_angle = 0.0
     real :: model_angle
 
@@ -161,12 +165,13 @@ program main
     do while (.not. window_should_close())
         dt = get_frame_time()
 
-       if (music_ready) call update_music_stream(bgm)
-	   
-    ! ---------- СБРОС moving ПРИ ОТКРЫТОМ МЕНЮ ----------
-    if (action_menu%visible) then
-      moving = .false.
+        if (music_ready) call update_music_stream(bgm)
+
+        ! ---------- СБРОС moving ПРИ ОТКРЫТОМ МЕНЮ ----------
+        if (action_menu%visible) then
+            moving = .false.
         end if
+
         ! ---------- АНИМАЦИЯ ----------
         if (have_anim .and. anim_count > 0) then
             if (.not. is_grounded) then
@@ -193,6 +198,33 @@ program main
             anim_timer = anim_timer + dt * 142.5
         end if
 
+        ! ---------- ВРАЩЕНИЕ КАМЕРЫ МЫШЬЮ (левая кнопка зажата) ----------
+        if (.not. action_menu%visible) then
+            if (is_mouse_button_pressed(MOUSE_BUTTON_LEFT)) then   ! ← заменили на LEFT
+                mouse_captured = .true.
+                call disable_cursor()
+                prev_mouse_x = get_mouse_x()
+                prev_mouse_y = get_mouse_y()
+            end if
+            if (is_mouse_button_released(MOUSE_BUTTON_LEFT)) then  ! ← заменили на LEFT
+                mouse_captured = .false.
+                call enable_cursor()
+            end if
+            if (mouse_captured) then
+                mouse_x = get_mouse_x()
+                mouse_y = get_mouse_y()
+                delta_x = mouse_x - prev_mouse_x
+                delta_y = mouse_y - prev_mouse_y
+                move_angle_h = move_angle_h + delta_x * mouse_sensitivity
+                camera_pitch = camera_pitch - delta_y * mouse_sensitivity
+                if (camera_pitch > 1.5) camera_pitch = 1.5
+                if (camera_pitch < -0.5) camera_pitch = -0.5
+                call set_mouse_position(SCREEN_WIDTH/2, SCREEN_HEIGHT/2)
+                prev_mouse_x = SCREEN_WIDTH/2
+                prev_mouse_y = SCREEN_HEIGHT/2
+            end if
+        end if
+
         ! ---------- ПОВОРОТ (блокируется при открытом меню) ----------
         if (.not. action_menu%visible) then
             if (is_key_down(KEY_LEFT))  move_angle_h = move_angle_h - rot_speed * dt
@@ -200,6 +232,9 @@ program main
         end if
 
         call update_follow_camera(follow_cam, player_pos, move_angle_h)
+
+        ! ---------- ПРИМЕНЕНИЕ ВЕРТИКАЛЬНОГО УГЛА КАМЕРЫ ----------
+        follow_cam%cam%target%y = follow_cam%cam%target%y + camera_pitch * camera_distance
 
         forward%x = sin(move_angle_h)
         forward%y = 0.0
